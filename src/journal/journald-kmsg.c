@@ -385,22 +385,62 @@ static int dispatch_dev_kmsg(sd_event_source *es, int fd, uint32_t revents, void
         return server_read_dev_kmsg(s);
 }
 
-int server_open_dev_kmsg(Server *s) {
-        int r;
+static int server_open_dev_kmsg_fd(Server *s) {
+        int fd = -1;
+
+        mode_t mode = O_CLOEXEC|O_NONBLOCK|O_NOCTTY|
+                (s->read_kmsg ? O_RDWR : O_WRONLY);
+
+        fd = open("/dev/kmsg", mode);
+        if (fd < 0)
+                log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_WARNING,
+                               errno,
+                               "Failed to open /dev/kmsg for %s access, ignoring: %m",
+                               accmode_to_string(mode));
+                return fd;
+
+        return fd;
+}
+
+int server_reload_dev_kmsg(Server *s) {
+        int r, fd = -1;
 
         assert(s);
 
         mode_t mode = O_CLOEXEC|O_NONBLOCK|O_NOCTTY|
                 (s->read_kmsg ? O_RDWR : O_WRONLY);
 
-        s->dev_kmsg_fd = open("/dev/kmsg", mode);
-        if (s->dev_kmsg_fd < 0) {
-                log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_WARNING,
-                               errno, "Failed to open /dev/kmsg for %s access, ignoring: %m", accmode_to_string(mode));
+        int flags = fcntl(s->dev_kmsg_fd, F_GETFL);
+        if (flags == -1) {
+                // TODO: close and reopen kmsg anyway or just exit?
+                log_full_errno(LOG_WARNING, errno, "Failed to check what mode dev_kmsg_fd was opened in: %m.\n");
+        } else if ((flags & mode) == mode) {
+                /* s->read_kmsg has not changed since before. No-op. */
                 return 0;
         }
 
-        if (!s->read_kmsg)
+        /* If mode is different or unable to be determined whether the mode is different, replace dev_kmsg_fd. */
+        s->dev_kmsg_fd = safe_close(s->dev_kmsg_fd);
+        s->dev_kmsg_fd = server_open_dev_kmsg_fd(s);
+        if (s->dev_kmsg_fd < 0 || !s->read_kmsg) {
+                s->dev_kmsg_readable = false;
+
+                // TODO: Should we remove the event associated with dev_kmsg_fd like below since it's now invalid?
+                s->dev_kmsg_event_source = sd_event_source_unref(s->dev_kmsg_event_source);
+                return 0;
+        }
+
+        s->dev_kmsg_readable = true;
+        return 0;
+}
+
+int server_open_dev_kmsg(Server *s) {
+        int r;
+
+        assert(s);
+
+        s->dev_kmsg_fd = server_open_dev_kmsg_fd(s);
+        if (s->dev_kmsg_fd < 0 || !s->read_kmsg)
                 return 0;
 
         r = sd_event_add_io(s->event, &s->dev_kmsg_event_source, s->dev_kmsg_fd, EPOLLIN, dispatch_dev_kmsg, s);
