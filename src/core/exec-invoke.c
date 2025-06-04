@@ -2,11 +2,13 @@
 
 #include <linux/prctl.h>
 #include <linux/sched.h>
+#include <linux/sched/types.h>
 #include <linux/securebits.h>
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
+#include <sys/syscall.h>
 
 #if HAVE_PAM
 #include <security/pam_appl.h>
@@ -59,6 +61,7 @@
 #include "string-table.h"
 #include "strv.h"
 #include "terminal-util.h"
+#include <unistd.h>
 #include "utmp-wtmp.h"
 #include "vpick.h"
 
@@ -5017,7 +5020,7 @@ int exec_invoke(
                         .sched_flags = context->cpu_sched_reset_on_fork ? SCHED_FLAG_RESET_ON_FORK : 0,
                 };
 
-                r = sched_setattr(/* pid= */ 0, &attr, /* flags= */ 0);
+                r = syscall(SYS_sched_setattr, 0, &attr, 0);
                 if (r < 0) {
                         *exit_status = EXIT_SETSCHEDULER;
                         return log_exec_error_errno(context, params, errno, "Failed to set up CPU scheduling: %m");

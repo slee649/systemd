@@ -32,7 +32,8 @@ assert_cc(PF_KTHREAD == 0x00200000);
 assert_cc(TASK_COMM_LEN == 16);
 #endif
 
-#if !HAVE_STRUCT_SCHED_ATTR
+#ifndef _LINUX_SCHED_TYPES_H
+#ifndef struct sched_attr
 struct sched_attr {
         __u32 size;             /* Size of this structure */
         __u32 sched_policy;     /* Policy (SCHED_*) */
@@ -47,4 +48,5 @@ struct sched_attr {
         __u64 sched_deadline;
         __u64 sched_period;
 };
+#endif
 #endif
